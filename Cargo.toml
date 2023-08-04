@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "src/observable",
+    "src/observable_literal",
+]
+resolver = "2"
