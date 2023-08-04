@@ -34,7 +34,6 @@ fn my_observable() -> Observable<String> {
 
 let _ = my_observable()
     .subscribe(observer! {
-        // subconsequent listeners can be omitted
         next: |value| {},
         error: |error| {},
         complete: || {},
