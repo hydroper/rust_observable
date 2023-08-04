@@ -7,4 +7,4 @@ repository = "https://github.com/hydroper/rust_observable"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rust_observable_literal = { path = "../observable_literal" }
+rust_observable_literal = { path = "../observable_literal", version = "0.1.0" }
