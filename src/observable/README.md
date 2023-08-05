@@ -7,9 +7,9 @@ The `observer!` macro constructs an opaque `Observer`. You can also implement yo
 Requirements:
 
 - The Rust standard library (`std`).
+- Nightly channel.
 
 ```rust
-use std::sync::Arc;
 use rust_observable::*;
 
 fn my_observable() -> Observable<String> {
@@ -18,9 +18,9 @@ fn my_observable() -> Observable<String> {
         observer.next("initial value".into());
 
         // return a cleanup function that runs on unsubscribe.
-        Arc::new(|| {
+        || {
             println!("cleanup on unsubscribe");
-        })
+        }
     })
 }
 

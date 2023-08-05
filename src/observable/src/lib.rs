@@ -26,9 +26,9 @@ fn my_observable() -> Observable<String> {
 
         // return a cleanup function that runs on
         // unsubscribe.
-        Arc::new(|| {
+        || {
             println!("cleanup on unsubscribe");
-        })
+        }
     })
 }
 
@@ -80,8 +80,16 @@ impl<T, Error> Observable<T, Error>
         Error: Send + Sync + 'static
 {
     /// Constructs an observable given a callback.
-    pub fn new(subscriber: impl SubscriberFunction<T, Error>) -> Self {
-        Self { subscriber: Arc::new(subscriber) }
+    pub fn new<F, G>(subscriber: F) -> Self
+        where
+            F: Fn(SubscriptionObserver<T, Error>) -> G + Send + Sync + 'static,
+            G: Fn() + Send + Sync + 'static,
+    {
+        Self {
+            subscriber: Arc::new(move |subobserver| {
+                Arc::new(subscriber(subobserver))
+            }),
+        }
     }
 
     /// Subscribes to the sequence with an observer.
@@ -120,9 +128,9 @@ impl<T, Error> Observable<T, Error>
                     }
                 },
             });
-            Arc::new(move || {
+            move || {
                 subscription.unsubscribe();
-            })
+            }
         })
     }
 
@@ -159,9 +167,9 @@ impl<T, Error> Observable<T, Error>
                     }
                 },
             });
-            Arc::new(move || {
+            move || {
                 subscription.unsubscribe();
-            })
+            }
         })
     }
 }
@@ -175,14 +183,15 @@ impl<T, Iterable> From<Iterable> for Observable<T, ()>
     fn from(value: Iterable) -> Self {
         let value = value.into_iter().collect::<Vec<T>>();
         Self::new(move |observer| {
+            let cleanup = || {};
             for item in &value {
                 observer.next(item.clone());
                 if observer.closed() {
-                    return Arc::new(|| {});
+                    return cleanup;
                 }
             }
             observer.complete();
-            Arc::new(|| {})
+            cleanup
         })
     }
 }
@@ -486,9 +495,9 @@ mod test {
             for color in ["red", "green", "blue"] {
                 observer.next(color.to_owned());
             }
-            Arc::new(|| {
+            || {
                 // cleanup
-            })
+            }
         })
             .subscribe(observer! {
                 next: {

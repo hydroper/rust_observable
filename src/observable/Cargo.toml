@@ -1,6 +1,6 @@
 [package]
 name = "rust_observable"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 repository = "https://github.com/hydroper/rust_observable"
 description = "Push-based data source Observable type"
