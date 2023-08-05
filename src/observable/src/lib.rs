@@ -86,9 +86,7 @@ impl<T, Error> Observable<T, Error>
             G: Fn() + Send + Sync + 'static,
     {
         Self {
-            subscriber: Arc::new(move |subobserver| {
-                Arc::new(subscriber(subobserver))
-            }),
+            subscriber: Arc::new(move |subobserver| { Arc::new(subscriber(subobserver)) })
         }
     }
 
