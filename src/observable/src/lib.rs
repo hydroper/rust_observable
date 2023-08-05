@@ -359,10 +359,13 @@ pub struct Observer<T, Error = ()>
     /// Receives a completion notification.
     pub complete: Box<dyn Fn() + Sync + Send>,
     /// Receives the subscription object when `subscribe` is called.
-    pub start: ObserverStartFunction<T, Error>,
+    pub start: Box<dyn ObserverStartFunction<T, Error>>,
 }
 
-type ObserverStartFunction<T, Error> = Box<dyn Fn(Arc<Subscription<T, Error>>) + Sync + Send>;
+pub trait ObserverStartFunction<T, Error> = Fn(Arc<Subscription<T, Error>>) + Sync + Send
+    where
+        T: Send + Sync + 'static,
+        Error: Send + Sync + 'static;
 
 impl<T, Error> AbstractObserver<T, Error> for Observer<T, Error>
     where
