@@ -13,7 +13,7 @@ use std::sync::Arc;
 use rust_observable::*;
 
 fn my_observable() -> Observable<String> {
-    Observable::new(Arc::new(|observer| {
+    Observable::new(|observer| {
         // send initial data
         observer.next("initial value".into());
 
@@ -21,7 +21,7 @@ fn my_observable() -> Observable<String> {
         Arc::new(|| {
             println!("cleanup on unsubscribe");
         })
-    }))
+    })
 }
 
 let _ = my_observable()

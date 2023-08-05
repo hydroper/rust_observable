@@ -199,11 +199,13 @@ where
     }
 }
 
-pub trait SubscriberFunction<T, Error = ()> = Fn(SubscriptionObserver<T, Error>) -> Arc<(dyn Fn() + Sync + Send + 'static)> + Sync + Send + 'static
+pub trait SubscriberFunction<T, Error = ()> = Fn(SubscriptionObserver<T, Error>) -> Arc<dyn SubscriptionCleanupFunction> + Sync + Send + 'static
     where
         T: Send + Sync + 'static,
         Error: Send + Sync + 'static;
 type BoxedSubscriberFunction<T, Error = ()> = Arc<(dyn SubscriberFunction<T, Error>)>;
+
+pub trait SubscriptionCleanupFunction = Fn() + Sync + Send + 'static;
 
 /// A `Subscription` is returned by `subscribe`.
 pub struct Subscription<T, Error = ()>
