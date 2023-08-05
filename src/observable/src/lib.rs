@@ -20,7 +20,7 @@ use std::sync::Arc;
 use rust_observable::*;
 
 fn my_observable() -> Observable<String> {
-    Observable::new(Arc::new(|observer| {
+    Observable::new(|observer| {
         // send initial data
         observer.next("initial value".into());
 
@@ -29,7 +29,7 @@ fn my_observable() -> Observable<String> {
         Arc::new(|| {
             println!("cleanup on unsubscribe");
         })
-    }))
+    })
 }
 
 let _ = my_observable()
@@ -60,6 +60,8 @@ Observable::from(["red", "green", "blue"])
 ```
 */
 
+#![feature(trait_alias)]
+
 use std::sync::{RwLock, Arc};
 
 /// An `Observable` represents a sequence of values which
@@ -69,7 +71,7 @@ pub struct Observable<T, Error = ()>
         T: Send + Sync + 'static,
         Error: Send + Sync + 'static
 {
-    subscriber: SubscriberFunction<T, Error>,
+    subscriber: BoxedSubscriberFunction<T, Error>,
 }
 
 impl<T, Error> Observable<T, Error>
@@ -78,8 +80,8 @@ impl<T, Error> Observable<T, Error>
         Error: Send + Sync + 'static
 {
     /// Constructs an observable given a callback.
-    pub fn new(subscriber: SubscriberFunction<T, Error>) -> Self {
-        Self { subscriber }
+    pub fn new(subscriber: impl SubscriberFunction<T, Error>) -> Self {
+        Self { subscriber: Arc::new(subscriber) }
     }
 
     /// Subscribes to the sequence with an observer.
@@ -88,12 +90,14 @@ impl<T, Error> Observable<T, Error>
     }
 
     /// Returns a new `Observable` that performs a map on data from the original.
-    pub fn map<U>(&self, map_fn: impl Fn(T) -> U + Send + Sync + 'static) -> Observable<U, Error>
-        where U: Send + Sync + 'static
+    pub fn map<U, F>(&self, map_fn: impl Fn(T) -> U + Send + Sync + 'static) -> Observable<U, Error>
+        where
+            U: Send + Sync + 'static,
+            F: SubscriberFunction<U, Error>,
     {
         let orig = self.clone();
         let map_fn = Arc::new(map_fn);
-        let f: SubscriberFunction<U, Error> = Arc::new(move |observer| {
+        Observable::<U, Error>::new(move |observer| {
             let map_fn = map_fn.clone();
             let observer = Arc::new(observer);
             let subscription = orig.subscribe(observer! {
@@ -119,17 +123,18 @@ impl<T, Error> Observable<T, Error>
             Arc::new(move || {
                 subscription.unsubscribe();
             })
-        });
-        Observable::<U, Error>::new(f)
+        })
     }
 
     /// Returns a new `Observable` that filters data specified by the predicate.
-    pub fn filter(&self, filter_fn: impl Fn(T) -> bool + 'static + Send + Sync) -> Observable<T, Error>
-        where T: Clone
+    pub fn filter<F>(&self, filter_fn: impl Fn(T) -> bool + 'static + Send + Sync) -> Observable<T, Error>
+        where
+            T: Clone,
+            F: SubscriberFunction<T, Error>,
     {
         let orig = self.clone();
         let filter_fn = Arc::new(filter_fn);
-        let f: SubscriberFunction<T, Error> = Arc::new(move |observer| {
+        Self::new(move |observer| {
             let filter_fn = filter_fn.clone();
             let observer = Arc::new(observer);
             let subscription = orig.subscribe(observer! {
@@ -157,8 +162,7 @@ impl<T, Error> Observable<T, Error>
             Arc::new(move || {
                 subscription.unsubscribe();
             })
-        });
-        Self::new(f)
+        })
     }
 }
 
@@ -170,7 +174,7 @@ impl<T, Iterable> From<Iterable> for Observable<T, ()>
     /// Constructs an `Observable` from a list of values.
     fn from(value: Iterable) -> Self {
         let value = value.into_iter().collect::<Vec<T>>();
-        Self::new(Arc::new(move |observer| {
+        Self::new(move |observer| {
             for item in &value {
                 observer.next(item.clone());
                 if observer.closed() {
@@ -179,7 +183,7 @@ impl<T, Iterable> From<Iterable> for Observable<T, ()>
             }
             observer.complete();
             Arc::new(|| {})
-        }))
+        })
     }
 }
 
@@ -195,7 +199,11 @@ where
     }
 }
 
-pub type SubscriberFunction<T, Error = ()> = Arc<(dyn Fn(SubscriptionObserver<T, Error>) -> Arc<(dyn Fn() + Sync + Send + 'static)> + Sync + Send + 'static)>;
+pub trait SubscriberFunction<T, Error = ()> = Fn(SubscriptionObserver<T, Error>) -> Arc<(dyn Fn() + Sync + Send + 'static)> + Sync + Send + 'static
+    where
+        T: Send + Sync + 'static,
+        Error: Send + Sync + 'static;
+type BoxedSubscriberFunction<T, Error = ()> = Arc<(dyn SubscriberFunction<T, Error>)>;
 
 /// A `Subscription` is returned by `subscribe`.
 pub struct Subscription<T, Error = ()>
@@ -204,15 +212,17 @@ pub struct Subscription<T, Error = ()>
         Error: Send + Sync + 'static
 {
     cleanup: RwLock<Option<Arc<dyn Fn() + Sync + Send>>>,
-    observer: RwLock<Option<Arc<RwLock<BoxedObserver<T, Error>>>>>,
+    observer: SubscriptionObserverLock<T, Error>,
 }
+
+type SubscriptionObserverLock<T, Error> = RwLock<Option<Arc<RwLock<BoxedObserver<T, Error>>>>>;
 
 impl<T, Error> Subscription<T, Error>
     where
         T: Send + Sync + 'static,
         Error: Send + Sync + 'static
 {
-    fn new(observer: BoxedObserver<T, Error>, subscriber: SubscriberFunction<T, Error>) -> Arc<Self> {
+    fn new(observer: BoxedObserver<T, Error>, subscriber: BoxedSubscriberFunction<T, Error>) -> Arc<Self> {
         let this = Arc::new(Self {
             cleanup: RwLock::new(None),
             observer: RwLock::new(Some(Arc::new(RwLock::new(observer)))),
@@ -278,7 +288,7 @@ impl<T, Error> SubscriptionObserver<T, Error>
             return;
         }
 
-        let observer = subscription.observer.read().unwrap().as_ref().map(|o| o.clone());
+        let observer = subscription.observer.read().unwrap().clone();
         if observer.is_none() {
             return;
         }
@@ -297,7 +307,7 @@ impl<T, Error> SubscriptionObserver<T, Error>
         }
 
         let observer = subscription.observer.read().unwrap();
-        if let Some(o) = observer.as_ref().map(|o| Arc::clone(o)) {
+        if let Some(o) = observer.as_ref().map(Arc::clone) {
             drop(observer);
             *subscription.observer.write().unwrap() = None;
             o.read().unwrap().error(error);
@@ -318,7 +328,7 @@ impl<T, Error> SubscriptionObserver<T, Error>
         }
 
         let observer = subscription.observer.read().unwrap();
-        if let Some(o) = observer.as_ref().map(|o| Arc::clone(o)) {
+        if let Some(o) = observer.as_ref().map(Arc::clone) {
             drop(observer);
             *subscription.observer.write().unwrap() = None;
             o.read().unwrap().complete();
@@ -347,8 +357,10 @@ pub struct Observer<T, Error = ()>
     /// Receives a completion notification.
     pub complete: Box<dyn Fn() + Sync + Send>,
     /// Receives the subscription object when `subscribe` is called.
-    pub start: Box<dyn Fn(Arc<Subscription<T, Error>>) + Sync + Send>,
+    pub start: ObserverStartFunction<T, Error>,
 }
+
+type ObserverStartFunction<T, Error> = Box<dyn Fn(Arc<Subscription<T, Error>>) + Sync + Send>;
 
 impl<T, Error> AbstractObserver<T, Error> for Observer<T, Error>
     where
@@ -384,13 +396,13 @@ impl<T, Error> Default for Observer<T, Error>
     }
 }
 
-impl<T, Error> Into<BoxedObserver<T, Error>> for Observer<T, Error>
+impl<T, Error> From<Observer<T, Error>> for BoxedObserver<T, Error>
     where
         T: Send + Sync + 'static,
         Error: Send + Sync + 'static
 {
-    fn into(self) -> BoxedObserver<T, Error> {
-        Box::new(self)
+    fn from(value: Observer<T, Error>) -> Self {
+        Box::new(value)
     }
 }
 
@@ -423,7 +435,7 @@ fn cleanup_subscription<T, Error>(subscription: &Subscription<T, Error>)
         Error: Send + Sync + 'static
 {
     assert!(subscription.observer.read().unwrap().is_none());
-    let cleanup = subscription.cleanup.read().unwrap().as_ref().map(|o| o.clone());
+    let cleanup = subscription.cleanup.read().unwrap().clone();
     if cleanup.is_none() {
         return;
     }
@@ -442,7 +454,7 @@ fn subscription_closed<T, Error>(subscription: &Subscription<T, Error>) -> bool
         T: Send + Sync + 'static,
         Error: Send + Sync + 'static
 {
-    let observer = subscription.observer.read().unwrap().as_ref().map(|o| o.clone());
+    let observer = subscription.observer.read().unwrap().clone();
     observer.is_none()
 }
 
@@ -465,14 +477,14 @@ mod test {
     #[test]
     fn subscription() {
         let list = Arc::new(RwLock::new(vec![]));
-        Observable::<_, ()>::new(Arc::new(|observer| {
+        Observable::<_, ()>::new(|observer| {
             for color in ["red", "green", "blue"] {
                 observer.next(color.to_owned());
             }
             Arc::new(|| {
                 // cleanup
             })
-        }))
+        })
             .subscribe(observer! {
                 next: {
                     let list = Arc::clone(&list);

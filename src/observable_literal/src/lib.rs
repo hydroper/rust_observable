@@ -25,12 +25,12 @@ impl Parse for Observer {
                 "start" | "next" | "error" | "complete" => {
                     input.parse::<Token![:]>()?;
                     if map.contains_key(&id.to_string()) {
-                        id.span().unwrap().error(format!(r#"Duplicating "{}" method"#, id.to_string())).emit();
+                        id.span().unwrap().error(format!(r#"Duplicating "{}" method"#, id)).emit();
                     }
                     map.insert(id.to_string(), (id, input.parse::<Expr>()?));
                 },
                 _ => {
-                    id.span().unwrap().error(format!(r#"Unknown "{}" method"#, id.to_string())).emit();
+                    id.span().unwrap().error(format!(r#"Unknown "{}" method"#, id)).emit();
                 },
             }
             if !input.peek(Token![,]) {
